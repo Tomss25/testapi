@@ -3,96 +3,81 @@ import requests
 
 BASE_URL = "https://api.polygon.io"
 
-# Mappatura strategica degli endpoint
-ENDPOINTS = {
-    "Stocks - Last Trade": {"url": "/v2/last/trade/{ticker}", "inputs": ["ticker"]},
-    "Stocks - Daily Open / Close": {"url": "/v1/open-close/{ticker}/{date}", "inputs": ["ticker", "date"]},
-    "Forex - Previous Close": {"url": "/v2/aggs/ticker/C:{ticker}/prev", "inputs": ["ticker"]},
-    "Crypto - Daily Open / Close": {"url": "/v1/open-close/crypto/{crypto_pair}/{date}", "inputs": ["crypto_pair", "date"]},
-    "Options - Snapshot Contract": {"url": "/v3/snapshot/options/{ticker}/{contract}", "inputs": ["ticker", "contract"]},
-    "Reference - Market Status": {"url": "/v1/marketstatus/now", "inputs": []}
-}
-
-st.set_page_config(page_title="Polygon API Explorer", layout="wide")
-st.title("API Data Explorer (Polygon.io)")
+st.set_page_config(page_title="Asset Dashboard", layout="wide")
+st.title("Terminale di Analisi Asset")
 st.markdown("---")
 
-# Input API Key
-api_key = st.text_input("Inserisci la tua API Key di Polygon", type="password")
+# 1. Configurazione
+api_key = st.text_input("Inserisci API Key (Polygon.io)", type="password")
 
-if api_key:
-    selected = st.selectbox("Seleziona Endpoint", list(ENDPOINTS.keys()))
-    config = ENDPOINTS[selected]
-    
-    st.markdown(f"**Endpoint target:** `{BASE_URL}{config['url']}`")
-    
-    user_inputs = {}
-    
-    # Generazione dinamica dei campi di input
-    if config["inputs"]:
-        cols = st.columns(len(config["inputs"]))
-        for i, req_input in enumerate(config["inputs"]):
-            with cols[i]:
-                if req_input == "date":
-                    user_inputs[req_input] = st.date_input("Data (YYYY-MM-DD)").strftime("%Y-%m-%d")
-                elif req_input == "crypto_pair":
-                    user_inputs[req_input] = st.text_input("Coppia Crypto (es. BTC/USD)").upper()
-                elif req_input == "contract":
-                    user_inputs[req_input] = st.text_input("ID Contratto (es. O:AAPL270115P00340000)").upper()
-                else:
-                    user_inputs[req_input] = st.text_input(f"{req_input.capitalize()} (es. AAPL)").upper()
-    
-    if st.button("Esegui Chiamata API", type="primary"):
-        # Validazione input
-        if any(not val for val in user_inputs.values()):
-            st.error("Errore: Compila tutti i parametri richiesti prima di inviare.")
-        else:
+# 2. L'unico input che conta
+ticker = st.text_input("Inserisci il Ticker dell'Asset (es. AAPL, TSLA, NVDA)").upper()
+
+if api_key and ticker:
+    if st.button("Analizza Asset", type="primary"):
+        
+        # Prepariamo le tre chiamate necessarie per un cruscotto reale
+        url_last_trade = f"{BASE_URL}/v2/last/trade/{ticker}?apiKey={api_key}"
+        url_prev_close = f"{BASE_URL}/v2/aggs/ticker/{ticker}/prev?apiKey={api_key}"
+        url_details = f"{BASE_URL}/v3/reference/tickers/{ticker}?apiKey={api_key}"
+        
+        with st.spinner(f"Costruzione dashboard per {ticker} in corso..."):
             try:
-                formatted_path = config["url"].format(**user_inputs)
-                full_url = f"{BASE_URL}{formatted_path}?apiKey={api_key}"
+                # Esecuzione delle chiamate
+                res_trade = requests.get(url_last_trade)
+                res_prev = requests.get(url_prev_close)
+                res_details = requests.get(url_details)
                 
-                with st.spinner("Interrogazione di Polygon in corso..."):
-                    response = requests.get(full_url)
-                
-                # Gestione Risposta e UI Dinamica
-                if response.status_code == 200:
-                    st.success(f"Status: {response.status_code} OK")
-                    data = response.json()
-                    
-                    st.markdown("### Analisi Dati")
-                    
-                    if isinstance(data, dict):
-                        # 1. Metriche di primo livello
-                        top_level_keys = {k: v for k, v in data.items() if not isinstance(v, (dict, list))}
-                        if top_level_keys:
-                            metrics_cols = st.columns(min(len(top_level_keys), 4))
-                            for i, (k, v) in enumerate(top_level_keys.items()):
-                                metrics_cols[i % len(metrics_cols)].metric(label=k.capitalize(), value=str(v).upper())
-                        
-                        st.markdown("---")
-                        
-                        # 2. Oggetti annidati (es. Status mercati, indici)
-                        nested_dicts = {k: v for k, v in data.items() if isinstance(v, dict)}
-                        for key, value in nested_dicts.items():
-                            with st.expander(f"📌 {key.upper()}", expanded=True):
-                                sub_cols = st.columns(min(len(value), 4))
-                                for i, (sub_k, sub_v) in enumerate(value.items()):
-                                    clean_label = sub_k.replace("_", " ").title()
-                                    sub_cols[i % len(sub_cols)].metric(label=clean_label, value=str(sub_v).upper())
-                        
-                        # 3. Liste di dati (es. Candele storiche, array di risultati)
-                        nested_lists = {k: v for k, v in data.items() if isinstance(v, list)}
-                        for key, value in nested_lists.items():
-                            st.markdown(f"**{key.upper()}**")
-                            st.dataframe(value, use_container_width=True)
-
-                    elif isinstance(data, list):
-                        st.dataframe(data, use_container_width=True)
-                    else:
-                        st.write(data)
+                # Se l'asset non esiste o la chiave è errata, blocchiamo tutto subito
+                if res_trade.status_code != 200:
+                    st.error(f"Impossibile recuperare i dati per {ticker}. Verifica il ticker e la chiave API.")
                 else:
-                    st.error(f"Errore {response.status_code}: {response.text}")
+                    data_trade = res_trade.json()
+                    data_prev = res_prev.json()
+                    data_details = res_details.json().get("results", {})
+                    
+                    # --- RENDER DELLA DASHBOARD ---
+                    
+                    # Intestazione con i dettagli della compagnia
+                    st.subheader(f"{data_details.get('name', ticker)} ({ticker})")
+                    st.caption(f"Settore: {data_details.get('sic_description', 'N/D')} | Mercato: {data_details.get('primary_exchange', 'N/D')}")
+                    
+                    st.markdown("### Dati di Mercato")
+                    
+                    # Estrazione logica dei prezzi
+                    last_price = data_trade.get("results", {}).get("p", 0.0)
+                    prev_close = data_prev.get("results", [{}])[0].get("c", 0.0)
+                    
+                    # Calcolo della variazione percentuale (logica di business reale, non solo stampa di JSON)
+                    if prev_close > 0:
+                        delta = last_price - prev_close
+                        delta_pct = (delta / prev_close) * 100
+                    else:
+                        delta = 0.0
+                        delta_pct = 0.0
+                        
+                    # Visualizzazione con metriche native e colori dinamici
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    col1.metric("Ultimo Prezzo", f"${last_price:,.2f}", f"{delta:,.2f} ({delta_pct:.2f}%)")
+                    col2.metric("Chiusura Precedente", f"${prev_close:,.2f}")
+                    col3.metric("Volume (Ieri)", f"{data_prev.get('results', [{}])[0].get('v', 0):,}")
+                    col4.metric("Market Cap", f"${data_details.get('market_cap', 0):,.0f}")
+                    
+                    st.markdown("---")
+                    
+                    # Debug tecnico nascosto (se proprio non riesci a fare a meno di guardare il JSON)
+                    with st.expander("Mostra Dati Grezzi (JSON)"):
+                        st.json({
+                            "Last Trade": data_trade,
+                            "Previous Close": data_prev,
+                            "Ticker Details": data_details
+                        })
+
             except Exception as e:
-                st.error(f"Errore critico durante l'esecuzione: {e}")
+                st.error(f"Errore critico durante l'elaborazione: {e}")
 else:
-    st.info("In attesa dell'API Key per sbloccare l'interfaccia.")
+    if not api_key:
+        st.info("Attesa API Key.")
+    elif not ticker:
+        st.info("Attesa inserimento Ticker.")
