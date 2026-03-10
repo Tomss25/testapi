@@ -3,8 +3,7 @@ import requests
 
 BASE_URL = "https://api.polygon.io"
 
-# Mappatura strategica: URL path e i parametri esatti che richiedono.
-# Se vuoi aggiungere altri endpoint dalla tua lista originale, DEVI seguire questa struttura.
+# Mappatura strategica degli endpoint
 ENDPOINTS = {
     "Stocks - Last Trade": {"url": "/v2/last/trade/{ticker}", "inputs": ["ticker"]},
     "Stocks - Daily Open / Close": {"url": "/v1/open-close/{ticker}/{date}", "inputs": ["ticker", "date"]},
@@ -18,8 +17,7 @@ st.set_page_config(page_title="Polygon API Explorer", layout="wide")
 st.title("API Data Explorer (Polygon.io)")
 st.markdown("---")
 
-# Sicurezza di base: l'API key viene passata a runtime. 
-# NON HARDCODARLA MAI QUI DENTRO SE PUBBLICHI SU GITHUB.
+# Input API Key
 api_key = st.text_input("Inserisci la tua API Key di Polygon", type="password")
 
 if api_key:
@@ -30,7 +28,7 @@ if api_key:
     
     user_inputs = {}
     
-    # Generazione dinamica dell'interfaccia basata sui requisiti dell'endpoint
+    # Generazione dinamica dei campi di input
     if config["inputs"]:
         cols = st.columns(len(config["inputs"]))
         for i, req_input in enumerate(config["inputs"]):
@@ -45,21 +43,53 @@ if api_key:
                     user_inputs[req_input] = st.text_input(f"{req_input.capitalize()} (es. AAPL)").upper()
     
     if st.button("Esegui Chiamata API", type="primary"):
-        # Controllo che l'utente non invii campi vuoti
+        # Validazione input
         if any(not val for val in user_inputs.values()):
             st.error("Errore: Compila tutti i parametri richiesti prima di inviare.")
         else:
             try:
-                # Iniezione dei parametri nel path
                 formatted_path = config["url"].format(**user_inputs)
                 full_url = f"{BASE_URL}{formatted_path}?apiKey={api_key}"
                 
                 with st.spinner("Interrogazione di Polygon in corso..."):
                     response = requests.get(full_url)
                 
+                # Gestione Risposta e UI Dinamica
                 if response.status_code == 200:
                     st.success(f"Status: {response.status_code} OK")
-                    st.json(response.json())
+                    data = response.json()
+                    
+                    st.markdown("### Analisi Dati")
+                    
+                    if isinstance(data, dict):
+                        # 1. Metriche di primo livello
+                        top_level_keys = {k: v for k, v in data.items() if not isinstance(v, (dict, list))}
+                        if top_level_keys:
+                            metrics_cols = st.columns(min(len(top_level_keys), 4))
+                            for i, (k, v) in enumerate(top_level_keys.items()):
+                                metrics_cols[i % len(metrics_cols)].metric(label=k.capitalize(), value=str(v).upper())
+                        
+                        st.markdown("---")
+                        
+                        # 2. Oggetti annidati (es. Status mercati, indici)
+                        nested_dicts = {k: v for k, v in data.items() if isinstance(v, dict)}
+                        for key, value in nested_dicts.items():
+                            with st.expander(f"📌 {key.upper()}", expanded=True):
+                                sub_cols = st.columns(min(len(value), 4))
+                                for i, (sub_k, sub_v) in enumerate(value.items()):
+                                    clean_label = sub_k.replace("_", " ").title()
+                                    sub_cols[i % len(sub_cols)].metric(label=clean_label, value=str(sub_v).upper())
+                        
+                        # 3. Liste di dati (es. Candele storiche, array di risultati)
+                        nested_lists = {k: v for k, v in data.items() if isinstance(v, list)}
+                        for key, value in nested_lists.items():
+                            st.markdown(f"**{key.upper()}**")
+                            st.dataframe(value, use_container_width=True)
+
+                    elif isinstance(data, list):
+                        st.dataframe(data, use_container_width=True)
+                    else:
+                        st.write(data)
                 else:
                     st.error(f"Errore {response.status_code}: {response.text}")
             except Exception as e:
