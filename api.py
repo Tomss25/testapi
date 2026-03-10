@@ -23,18 +23,12 @@ if api_key and ticker:
                 res_prev = requests.get(url_prev_close)
                 res_details = requests.get(url_details)
                 
-                # --- BLOCCO DI DEBUG BRUTALE ---
-                # Se anche solo una chiamata fallisce, fermiamo tutto e leggiamo i log del server.
-                if res_trade.status_code != 200 or res_prev.status_code != 200 or res_details.status_code != 200:
-                    st.error("Il server di Polygon ha rifiutato la richiesta. Smettila di tirare a indovinare e leggi questi log:")
-                    colA, colB, colC = st.columns(3)
-                    colA.error(f"Ultimo Trade: HTTP {res_trade.status_code}\n\n{res_trade.text}")
-                    colB.error(f"Chiusura Prec: HTTP {res_prev.status_code}\n\n{res_prev.text}")
-                    colC.error(f"Dettagli: HTTP {res_details.status_code}\n\n{res_details.text}")
-                    st.stop() # Uccide l'esecuzione del codice qui.
+                # Se falliscono i dati storici o anagrafici, fermiamo l'esecuzione
+                if res_prev.status_code != 200 or res_details.status_code != 200:
+                    st.error("Errore critico: Impossibile recuperare l'anagrafica o la chiusura precedente. Verifica il ticker e la chiave API.")
+                    st.stop()
                 
-                # --- RENDER DELLA DASHBOARD (Se non ci sono errori) ---
-                data_trade = res_trade.json()
+                # Estrazione dati sicuri
                 data_prev = res_prev.json()
                 data_details = res_details.json().get("results", {})
                 
@@ -43,33 +37,42 @@ if api_key and ticker:
                 
                 st.markdown("### Dati di Mercato")
                 
-                last_price = data_trade.get("results", {}).get("p", 0.0)
                 prev_close = data_prev.get("results", [{}])[0].get("c", 0.0)
+                volume = data_prev.get("results", [{}])[0].get("v", 0)
+                market_cap = data_details.get("market_cap", 0)
                 
-                if prev_close > 0:
+                # Gestione dell'errore 403 in modo isolato
+                if res_trade.status_code == 200:
+                    last_price = res_trade.json().get("results", {}).get("p", 0.0)
                     delta = last_price - prev_close
-                    delta_pct = (delta / prev_close) * 100
+                    delta_pct = (delta / prev_close) * 100 if prev_close > 0 else 0.0
+                    price_display = f"${last_price:,.2f}"
+                    delta_display = f"{delta:,.2f} ({delta_pct:.2f}%)"
                 else:
-                    delta = 0.0
-                    delta_pct = 0.0
+                    price_display = "Dato Premium (403)"
+                    delta_display = "N/D"
                     
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Ultimo Prezzo", f"${last_price:,.2f}", f"{delta:,.2f} ({delta_pct:.2f}%)")
+                col1.metric("Ultimo Prezzo (Real-Time)", price_display, delta_display)
                 col2.metric("Chiusura Precedente", f"${prev_close:,.2f}")
-                col3.metric("Volume (Ieri)", f"{data_prev.get('results', [{}])[0].get('v', 0):,}")
-                col4.metric("Market Cap", f"${data_details.get('market_cap', 0):,.0f}")
+                col3.metric("Volume (Ieri)", f"{volume:,}")
+                col4.metric("Market Cap", f"${market_cap:,.0f}")
                 
                 st.markdown("---")
                 
-                with st.expander("Mostra Dati Grezzi (JSON)"):
+                # Debug tecnico espandibile
+                with st.expander("Mostra Log di Sistema e Dati Grezzi"):
                     st.json({
-                        "Last Trade": data_trade,
+                        "Status Last Trade": res_trade.status_code,
+                        "Status Prev Close": res_prev.status_code,
+                        "Status Details": res_details.status_code,
+                        "Last Trade Raw": res_trade.json() if res_trade.status_code == 200 else res_trade.text,
                         "Previous Close": data_prev,
                         "Ticker Details": data_details
                     })
 
             except Exception as e:
-                st.error(f"Errore critico durante l'elaborazione: {e}")
+                st.error(f"Errore critico di sistema: {e}")
 else:
     if not api_key:
         st.info("Attesa API Key.")
